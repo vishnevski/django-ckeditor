@@ -9,6 +9,11 @@ from django.shortcuts import render_to_response
 from django.template import RequestContext
 
 try:
+    from pytils.translit import translify
+except ImportError:
+    translify = lambda x: x
+
+try:
     from PIL import Image, ImageOps
 except ImportError:
     import Image
@@ -117,10 +122,9 @@ def upload(request):
     """
     # Get the uploaded file from request.
     upload = request.FILES['upload']
-    upload_ext = os.path.splitext(upload.name)[1]
 
     # Open output file in which to store upload.
-    upload_filename = get_upload_filename(upload.name, request.user)
+    upload_filename = get_upload_filename(translify(upload.name), request.user)
     out = open(upload_filename, 'wb+')
 
     # Iterate through chunks and write to destination.
