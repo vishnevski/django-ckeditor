@@ -56,17 +56,21 @@ def get_thumb_filename(file_name):
 
 
 def create_thumbnail(filename):
-    image = Image.open(filename)
+    try:
+        image = Image.open(filename)
+    except IOError:
+        pass
+    else:
+        # Convert to RGB if necessary
+        # Thanks to Limodou on DjangoSnippets.org
+        # http://www.djangosnippets.org/snippets/20/
+        if image.mode not in ('L', 'RGB'):
+            image = image.convert('RGB')
 
-    # Convert to RGB if necessary
-    # Thanks to Limodou on DjangoSnippets.org
-    # http://www.djangosnippets.org/snippets/20/
-    if image.mode not in ('L', 'RGB'):
-        image = image.convert('RGB')
+        # scale and crop to thumbnail
+        imagefit = ImageOps.fit(image, THUMBNAIL_SIZE, Image.ANTIALIAS)
+        imagefit.save(get_thumb_filename(filename))
 
-    # scale and crop to thumbnail
-    imagefit = ImageOps.fit(image, THUMBNAIL_SIZE, Image.ANTIALIAS)
-    imagefit.save(get_thumb_filename(filename))
 
 
 def get_media_url(path):
