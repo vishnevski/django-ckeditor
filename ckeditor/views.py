@@ -1,6 +1,7 @@
 import os
 import re
 from urlparse import urlparse, urlunparse
+from hashlib import md5
 from datetime import datetime
 
 from django.conf import settings
@@ -27,93 +28,24 @@ except ImportError:
     def csrf_exempt(fn):
         return fn
 
-THUMBNAIL_SIZE = (75, 75)
 
-
-def get_available_name(name):
-    """
-    Returns a filename that's free on the target storage system, and
-    available for new content to be written to.
-    """
-    dir_name, file_name = os.path.split(name)
-    file_root, file_ext = os.path.splitext(file_name)
-    # If the filename already exists, keep adding an underscore (before the
-    # file extension, if one exists) to the filename until the generated
-    # filename doesn't exist.
-    while os.path.exists(name):
-        file_root += '_'
-        # file_ext includes the dot.
-        name = os.path.join(dir_name, file_root + file_ext)
-    return name
-
-
-def get_thumb_filename(file_name):
-    """
-    Generate thumb filename by adding _thumb to end of
-    filename before . (if present)
-    """
-    return '%s_thumb%s' % os.path.splitext(file_name)
-
-
-def create_thumbnail(filename):
-    try:
-        image = Image.open(filename)
-    except IOError:
-        pass
-    else:
-        # Convert to RGB if necessary
-        # Thanks to Limodou on DjangoSnippets.org
-        # http://www.djangosnippets.org/snippets/20/
-        if image.mode not in ('L', 'RGB'):
-            image = image.convert('RGB')
-
-        # scale and crop to thumbnail
-        imagefit = ImageOps.fit(image, THUMBNAIL_SIZE, Image.ANTIALIAS)
-        imagefit.save(get_thumb_filename(filename))
-
+def generate_filename(filename):
+    hash_line = str(filename.encode(u'utf-8') + datetime.now().strftime(u"%Y-%m-%d %H:%M:%S"))
+    operation_hash = md5(hash_line).hexdigest()
+    md5_line = operation_hash[:4]
+    ext = filename.split('.')[-1]
+    file_path = os.path.join(settings.MEDIA_ROOT, ext.lower(), md5_line[:2], md5_line[2:])
+    if not os.path.exists(file_path):
+        try:
+            os.makedirs(file_path, mode=0755)
+        except Exception, e:
+            pass
+    hash_filename = operation_hash + '.' + ext
+    return os.path.join(file_path, hash_filename)
 
 
 def get_media_url(path):
-    """
-    Determine system file's media URL.
-    """
-    upload_prefix = getattr(settings, "CKEDITOR_UPLOAD_PREFIX", None)
-    if upload_prefix:
-        url = upload_prefix + path.replace(settings.CKEDITOR_UPLOAD_PATH, '')
-    else:
-        url = settings.MEDIA_URL + path.replace(settings.MEDIA_ROOT, '')
-
-    # Remove multiple forward-slashes from the path portion of the url.
-    # Break url into a list.
-    url_parts = list(urlparse(url))
-    # Replace two or more slashes with a single slash.
-    url_parts[2] = re.sub('\/+', '/', url_parts[2])
-    # Reconstruct the url.
-    url = urlunparse(url_parts)
-
-    return url
-
-
-def get_upload_filename(upload_name, user):
-    # If CKEDITOR_RESTRICT_BY_USER is True upload file to user specific path.
-    if getattr(settings, 'CKEDITOR_RESTRICT_BY_USER', False):
-        user_path = user.username
-    else:
-        user_path = ''
-
-    # Generate date based path to put uploaded file.
-    date_path = datetime.now().strftime('%Y/%m/%d')
-
-    # Complete upload path (upload_path + date_path).
-    upload_path = os.path.join(settings.CKEDITOR_UPLOAD_PATH, user_path, \
-            date_path)
-
-    # Make sure upload_path exists.
-    if not os.path.exists(upload_path):
-        os.makedirs(upload_path)
-
-    # Get available name and return.
-    return get_available_name(os.path.join(upload_path, upload_name))
+    return path.replace(settings.MEDIA_ROOT, settings.MEDIA_URL[:-1])
 
 
 @csrf_exempt
@@ -128,7 +60,8 @@ def upload(request):
     upload = request.FILES['upload']
 
     # Open output file in which to store upload.
-    upload_filename = get_upload_filename(translify(upload.name), request.user)
+    upload_filename = generate_filename(translify(upload.name))
+    url = get_media_url(upload_filename)
     out = open(upload_filename, 'wb+')
 
     # Iterate through chunks and write to destination.
@@ -136,10 +69,7 @@ def upload(request):
         out.write(chunk)
     out.close()
 
-    create_thumbnail(upload_filename)
-
     # Respond with Javascript sending ckeditor upload url.
-    url = get_media_url(upload_filename)
     return HttpResponse("""
     <script type='text/javascript'>
         window.parent.CKEDITOR.tools.callFunction(%s, '%s');
@@ -153,8 +83,7 @@ def get_image_files(user=None):
     """
     # If a user is provided and CKEDITOR_RESTRICT_BY_USER is True,
     # limit images to user specific path, but not for superusers.
-    if user and not user.is_superuser and getattr(settings, \
-            'CKEDITOR_RESTRICT_BY_USER', False):
+    if user and not user.is_superuser and getattr(settings, 'CKEDITOR_RESTRICT_BY_USER', False):
         user_path = user.username
     else:
         user_path = ''
@@ -177,7 +106,7 @@ def get_image_browse_urls(user=None):
     images = []
     for filename in get_image_files(user=user):
         images.append({
-            'thumb': get_media_url(get_thumb_filename(filename)),
+            'thumb': get_media_url(filename),
             'src': get_media_url(filename)
         })
 
